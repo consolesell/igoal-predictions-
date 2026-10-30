@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, Header, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -10,7 +10,7 @@ from slowapi.errors import RateLimitExceeded
 
 from backend.app.config import settings
 from backend.app.database import engine, Base, AsyncSessionLocal
-from backend.app.routers import health, fixtures, tips, results
+from backend.app.routers import health, fixtures, tips, results, admin, clubs, users
 from backend.app.services.engine import prediction_engine
 from backend.app.services.settler import settlement_worker
 
@@ -37,7 +37,7 @@ limiter = Limiter(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: ensure tables exist
-    logger.info("Initializing iGoal Predictions production database tables...")
+    logger.info("Initializing iGoal Predictions production database tables (v2.0)...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database initialized successfully. System ready.")
@@ -98,16 +98,27 @@ app.include_router(health.router, prefix="/v1")
 app.include_router(fixtures.router, prefix="/v1")
 app.include_router(tips.router, prefix="/v1")
 app.include_router(results.router, prefix="/v1")
+app.include_router(admin.router, prefix="/v1")
+app.include_router(clubs.router, prefix="/v1")
+app.include_router(users.router, prefix="/v1")
 
-# Background worker trigger routes for automated cron / cloud scheduler
+# Background worker trigger routes for automated cron / cloud scheduler (protected)
 @app.post("/v1/workers/engine/run", tags=["Workers"])
-async def trigger_prediction_engine():
+async def trigger_prediction_engine(authorization: str = Header(None)):
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization and authorization.startswith("Bearer ") else authorization
+    if token not in (settings.ADMIN_TOKEN, settings.CRON_SECRET):
+        raise HTTPException(status_code=403, detail={"error": "Forbidden: Invalid cron worker credentials"})
+
     async with AsyncSessionLocal() as session:
         created = await prediction_engine.run_worker(session)
     return {"ok": True, "created": created, "message": f"Generated {created} new prediction tips"}
 
 @app.post("/v1/workers/settler/run", tags=["Workers"])
-async def trigger_settler():
+async def trigger_settler(authorization: str = Header(None)):
+    token = authorization.split("Bearer ", 1)[1].strip() if authorization and authorization.startswith("Bearer ") else authorization
+    if token not in (settings.ADMIN_TOKEN, settings.CRON_SECRET):
+        raise HTTPException(status_code=403, detail={"error": "Forbidden: Invalid cron worker credentials"})
+
     async with AsyncSessionLocal() as session:
         settled = await settlement_worker.run_worker(session)
     return {"ok": True, "settled": settled, "message": f"Settled {settled} completed predictions"}

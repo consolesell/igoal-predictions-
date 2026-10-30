@@ -21,6 +21,16 @@ class Settings(BaseSettings):
     ENGINE_SOURCE: str = "igoal-engine-v1"
     SETTLER_SOURCE: str = "settler-v1"
     
+    # Security & Admin Auth
+    ADMIN_TOKEN: str = "igoal_admin_secret_2026"
+    CRON_SECRET: str = "igoal_cron_worker_secret_2026"
+    
+    # Firebase Storage & Auth
+    FIREBASE_PROJECT_ID: str = "igoal-predictions-prod"
+    FIREBASE_STORAGE_BUCKET: str = "igoal-predictions-prod.appspot.com"
+    FIREBASE_STORAGE_BASE_URL: str = "https://storage.googleapis.com/igoal-predictions-prod.appspot.com"
+    FCM_SERVER_KEY: str = ""
+    
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     

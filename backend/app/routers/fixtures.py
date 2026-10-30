@@ -21,6 +21,7 @@ async def get_fixtures(
     """
     Returns fixtures scheduled on a given UTC calendar day.
     Adheres strictly to docs/API_CONTRACT.md and Android BackendClient.java model.
+    Excludes soft-deleted fixtures and includes optional club logo URLs.
     """
     if not DATE_REGEX.match(date):
         raise HTTPException(
@@ -39,13 +40,14 @@ async def get_fixtures(
             detail={"error": "Invalid calendar date."}
         )
 
-    # Query fixtures in that epoch window
+    # Query active (non-deleted) fixtures in that epoch window
     stmt = (
         select(Fixture)
         .where(
             Fixture.kickoff >= start_epoch,
             Fixture.kickoff < end_epoch,
-            Fixture.status.in_(VALID_STATUSES)
+            Fixture.status.in_(VALID_STATUSES),
+            Fixture.deleted_at == None  # Phase 1: Exclude soft-deleted
         )
         .order_by(Fixture.kickoff.asc())
     )
@@ -70,7 +72,11 @@ async def get_fixtures(
                 status=r.status,
                 home_goals=h_goals,
                 away_goals=a_goals,
-                minute=min_val
+                minute=min_val,
+                home_club_id=r.home_club_id,
+                away_club_id=r.away_club_id,
+                home_logo_url=r.home_logo_url,
+                away_logo_url=r.away_logo_url
             )
         )
 

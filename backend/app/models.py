@@ -12,6 +12,23 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from backend.app.database import Base
 
+class Club(Base):
+    __tablename__ = "clubs"
+
+    id = Column(String(64), primary_key=True, index=True)
+    name = Column(String(100), nullable=False, index=True)
+    short_name = Column(String(30), nullable=False)
+    country = Column(String(64), nullable=False)
+    logo_path = Column(String(255), nullable=True)   # Firebase Storage path: clubs/{clubId}/logo.png
+    logo_url = Column(String(512), nullable=True)    # Public CDN / Storage URL
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+
 class Fixture(Base):
     __tablename__ = "fixtures"
 
@@ -25,6 +42,11 @@ class Fixture(Base):
     home_goals = Column(Integer, nullable=True)
     away_goals = Column(Integer, nullable=True)
     minute = Column(Integer, nullable=True)
+    home_club_id = Column(String(64), ForeignKey("clubs.id", ondelete="SET NULL"), nullable=True)
+    away_club_id = Column(String(64), ForeignKey("clubs.id", ondelete="SET NULL"), nullable=True)
+    home_logo_url = Column(String(512), nullable=True)
+    away_logo_url = Column(String(512), nullable=True)
+    deleted_at = Column(BigInteger, nullable=True, index=True)  # Unix epoch SECONDS (null = active)
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -56,6 +78,8 @@ class Tip(Base):
     published_at = Column(BigInteger, nullable=False, index=True)  # Unix epoch SECONDS
     model_version = Column(String(32), nullable=False)
     tier = Column(String(10), nullable=False, default="free", index=True)  # free, premium
+    home_logo_url = Column(String(512), nullable=True)
+    away_logo_url = Column(String(512), nullable=True)
 
     fixture = relationship("Fixture", back_populates="tips")
     settlement = relationship("SettlementResult", back_populates="tip", uselist=False, cascade="all, delete-orphan")
@@ -81,3 +105,33 @@ class SettlementResult(Base):
     __table_args__ = (
         CheckConstraint("status IN ('WON', 'LOST', 'VOID', 'POSTPONED')", name="chk_settlement_status"),
     )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    uid = Column(String(128), primary_key=True)
+    email = Column(String(128), nullable=True)
+    display_name = Column(String(128), nullable=True)
+    role = Column(String(20), nullable=False, default="user")  # user, admin
+    tier = Column(String(20), nullable=False, default="free", index=True)  # free, vip
+    vip_expires_at = Column(BigInteger, nullable=True)  # Unix epoch SECONDS
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'admin')", name="chk_user_role"),
+        CheckConstraint("tier IN ('free', 'vip')", name="chk_user_tier"),
+    )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(String(64), primary_key=True)
+    actor_id = Column(String(128), nullable=False)
+    action = Column(String(64), nullable=False)
+    target_type = Column(String(32), nullable=False)
+    target_id = Column(String(64), nullable=False)
+    details = Column(Text, nullable=True)
+    created_at = Column(BigInteger, nullable=False, index=True)  # Unix epoch SECONDS
