@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # 1. FastAPI Application Service
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: igoal_backend_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MODE=production
+      - DATABASE_URL=postgresql+asyncpg://igoal_user:igoal_secure_pwd@postgres:5432/igoal_db
+      - REDIS_URL=redis://redis:6379/0
+      - FOOTBALL_DATA_API_KEY=${FOOTBALL_DATA_API_KEY:-}
+      - RATE_LIMIT_PER_MINUTE=60
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - igoal_network
+
+  # 2. PostgreSQL 16 Relational Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: igoal_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: igoal_user
+      POSTGRES_PASSWORD: igoal_secure_pwd
+      POSTGRES_DB: igoal_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U igoal_user -d igoal_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - igoal_network
+
+  # 3. Redis Broker & Rate Limiting Cache
+  redis:
+    image: redis:7-alpine
+    container_name: igoal_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - igoal_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  igoal_network:
+    driver: bridge

@@ -1,0 +1,6 @@
+{
+  "name": "iGoal Predictions Backend",
+  "description": "Production backend and API service for iGoal Predictions Android application with Poisson prediction engine, automated settlement worker, and live API endpoints.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
