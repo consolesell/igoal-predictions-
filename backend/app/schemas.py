@@ -134,9 +134,10 @@ class AdminTipCreate(ContractModel):
     market: str
     selection: str
     confidence: int = Field(..., ge=0, le=100)
-    risk: TipRisk
-    explanation: str
+    risk: Optional[TipRisk] = None
+    explanation: Optional[str] = None
     tier: TipTier = "free"
+    model_version: Optional[str] = Field(default="expert-analyst-1.0", alias="modelVersion")
 
 # ------------------------------------------------------------------------------
 # 5. Results / Settlement

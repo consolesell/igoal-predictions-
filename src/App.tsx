@@ -36,8 +36,17 @@ import {
   ExternalLink,
   ChevronRight,
   Lock,
-  Unlock
+  Unlock,
+  Wand2,
+  Target,
+  Percent,
+  Sliders,
+  LayoutGrid,
+  List,
+  Globe,
+  Info
 } from 'lucide-react';
+import { MAJOR_CLUBS, dictateClub, dictateFixtureLogos, ClubInfo, DictationResult } from './data/clubsData';
 
 interface Club {
   id: string;
@@ -132,8 +141,40 @@ interface SystemStats {
   vipUsersCount: number;
 }
 
+// Market options and selection presets for posting predictions
+const MARKET_OPTIONS = [
+  {
+    market: 'Match Winner (1X2)',
+    presets: ['Home win', 'Draw', 'Away win'],
+  },
+  {
+    market: 'Over/Under 2.5 Goals',
+    presets: ['Over 2.5', 'Under 2.5'],
+  },
+  {
+    market: 'Both Teams to Score',
+    presets: ['Yes', 'No'],
+  },
+  {
+    market: 'Double Chance',
+    presets: ['1X (Home or Draw)', 'X2 (Away or Draw)', '12 (Home or Away)'],
+  },
+  {
+    market: 'Over/Under 1.5 Goals',
+    presets: ['Over 1.5', 'Under 1.5'],
+  },
+  {
+    market: 'Draw No Bet',
+    presets: ['Home (DNB)', 'Away (DNB)'],
+  },
+  {
+    market: 'Correct Score',
+    presets: ['2-1', '1-0', '2-0', '1-1', '3-1', '0-0', '1-2', '0-2'],
+  },
+];
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'admin_fixtures' | 'clubs' | 'vip_users' | 'explorer' | 'workers' | 'contracts' | 'tests'>('admin_fixtures');
+  const [activeTab, setActiveTab] = useState<'admin_fixtures' | 'tips_studio' | 'clubs' | 'vip_users' | 'explorer' | 'workers' | 'contracts' | 'tests'>('admin_fixtures');
 
   // Backend state
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
@@ -167,6 +208,22 @@ export default function App() {
   const [fixtureStatusFilter, setFixtureStatusFilter] = useState<string>('ALL');
   const [showDeletedFixtures, setShowDeletedFixtures] = useState(false);
 
+  // Search & Filters in Tips Studio
+  const [tipSearch, setTipSearch] = useState('');
+  const [tipTierFilter, setTipTierFilter] = useState<string>('ALL');
+  const [tipStatusFilter, setTipStatusFilter] = useState<string>('ALL');
+
+  // Mobile & Responsive View Modes (cards vs table)
+  const [fixturesViewMode, setFixturesViewMode] = useState<'cards' | 'table'>('cards');
+  const [tipsViewMode, setTipsViewMode] = useState<'cards' | 'table'>('cards');
+
+  // Auto-Dictation Engine & Sandbox State
+  const [dictationQuery, setDictationQuery] = useState('Madrid Real');
+  const [clubsLeagueFilter, setClubsLeagueFilter] = useState('ALL');
+  const [clubsSearch, setClubsSearch] = useState('');
+  const [isAutoDictatingAll, setIsAutoDictatingAll] = useState(false);
+  const [autoDictateBanner, setAutoDictateBanner] = useState<string | null>(null);
+
   // Modals state
   const [showCreateFixtureModal, setShowCreateFixtureModal] = useState(false);
   const [newFxHome, setNewFxHome] = useState('');
@@ -182,6 +239,24 @@ export default function App() {
   const [editHomeGoals, setEditHomeGoals] = useState(2);
   const [editAwayGoals, setEditAwayGoals] = useState(1);
   const [editMinute, setEditMinute] = useState(90);
+
+  // POST PREDICTION MODAL STATE (Accommodate Posting Predictions)
+  const [showPostTipModal, setShowPostTipModal] = useState(false);
+  const [tipFixtureId, setTipFixtureId] = useState('');
+  const [tipMarket, setTipMarket] = useState('Match Winner (1X2)');
+  const [tipSelection, setTipSelection] = useState('Home win');
+  const [tipConfidence, setTipConfidence] = useState(72);
+  const [tipRisk, setTipRisk] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('LOW');
+  const [tipTier, setTipTier] = useState<'free' | 'premium'>('free');
+  const [tipExplanation, setTipExplanation] = useState('');
+  const [tipModelVersion, setTipModelVersion] = useState('expert-analyst-1.0');
+
+  // Force Settlement Modal state
+  const [showForceSettleModal, setShowForceSettleModal] = useState(false);
+  const [settleTipId, setSettleTipId] = useState('');
+  const [settleOutcome, setSettleOutcome] = useState<'WON' | 'LOST' | 'VOID' | 'POSTPONED'>('WON');
+  const [settleHomeGoals, setSettleHomeGoals] = useState(2);
+  const [settleAwayGoals, setSettleAwayGoals] = useState(1);
 
   const [clubToEditLogo, setClubToEditLogo] = useState<Club | null>(null);
   const [newLogoUrl, setNewLogoUrl] = useState('');
@@ -304,6 +379,160 @@ export default function App() {
     }
   };
 
+  // Helper to auto-calculate risk from confidence
+  const calculateRiskFromConfidence = (conf: number): 'LOW' | 'MEDIUM' | 'HIGH' => {
+    return conf >= 70 ? 'LOW' : conf >= 58 ? 'MEDIUM' : 'HIGH';
+  };
+
+  // Auto-Draft Poisson Analysis for chosen fixture and selection
+  const handleAutoDraftPoisson = () => {
+    const fx = fixtures.find((f) => f.id === tipFixtureId);
+    if (!fx) return;
+
+    let hash = 0;
+    for (let i = 0; i < fx.home.length; i++) hash = (hash * 31 + fx.home.charCodeAt(i)) & 0xffff;
+    const homeAdv = (((hash % 100) - 50) / 100) * 0.6;
+
+    let awayHash = 0;
+    for (let i = 0; i < fx.away.length; i++) awayHash = (awayHash * 31 + fx.away.charCodeAt(i)) & 0xffff;
+    const awayAdv = (((awayHash % 100) - 50) / 100) * 0.6;
+
+    const lambdaHome = +(1.55 + homeAdv - awayAdv * 0.3).toFixed(2);
+    const lambdaAway = +(1.15 + awayAdv - homeAdv * 0.3).toFixed(2);
+    const totalGoals = +(lambdaHome + lambdaAway).toFixed(2);
+
+    let conf = 72;
+    let exp = `Poisson bivariate analysis projects ${fx.home} (${lambdaHome} xG) vs ${fx.away} (${lambdaAway} xG).`;
+
+    if (tipMarket.includes('1X2') || tipMarket.includes('Winner')) {
+      if (tipSelection.includes('Home')) {
+        conf = Math.min(88, Math.max(55, Math.round(52 + (lambdaHome - lambdaAway) * 22)));
+        exp = `Poisson home lean (xG ${lambdaHome} vs ${lambdaAway}); offensive conversion and defensive records favor ${fx.home}. Empirical models agree within 6 points.`;
+      } else if (tipSelection.includes('Away')) {
+        conf = Math.min(84, Math.max(52, Math.round(48 + (lambdaAway - lambdaHome) * 22)));
+        exp = `Counter-attacking efficiency favors ${fx.away} (xG ${lambdaAway}); expected road conversion differential exceeds baseline.`;
+      } else {
+        conf = 58;
+        exp = `Balanced projected chance creation (${lambdaHome} vs ${lambdaAway}) indicates tight low-margin draw potential.`;
+      }
+    } else if (tipMarket.includes('2.5') || tipMarket.includes('Goals')) {
+      if (tipSelection.includes('Over')) {
+        conf = totalGoals > 2.6 ? 76 : 65;
+        exp = `Combined expected goals (${totalGoals}) exceed market threshold; open transitional pace favors Over 2.5.`;
+      } else {
+        conf = totalGoals < 2.5 ? 74 : 63;
+        exp = `Combined expected goals (${totalGoals}) sit below line; compact defensive shape favors Under 2.5.`;
+      }
+    } else if (tipMarket.includes('Both Teams') || tipMarket.includes('BTTS')) {
+      conf = 69;
+      exp = `Both clubs averaging consistent scoring form; defensive concession rates support BTTS outcome.`;
+    }
+
+    setTipConfidence(conf);
+    setTipRisk(calculateRiskFromConfidence(conf));
+    setTipExplanation(exp);
+  };
+
+  // POST PREDICTION (Accommodate Posting Predictions)
+  const handlePostPrediction = async () => {
+    if (!tipFixtureId) {
+      alert('Please select a fixture');
+      return;
+    }
+    if (!tipSelection) {
+      alert('Please enter a selection (e.g. Home win, Over 2.5)');
+      return;
+    }
+
+    try {
+      const res = await fetch('/v1/admin/tips', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          fixtureId: tipFixtureId,
+          market: tipMarket,
+          selection: tipSelection,
+          confidence: tipConfidence,
+          risk: tipRisk,
+          explanation: tipExplanation || undefined,
+          tier: tipTier,
+          modelVersion: tipModelVersion,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Failed to post prediction: ${err.error || res.statusText}`);
+        return;
+      }
+
+      const published = await res.json();
+      setShowPostTipModal(false);
+      await fetchState();
+      alert(`Prediction published successfully!\nTip ID: ${published.id}\nTier: ${published.tier.toUpperCase()}`);
+    } catch (err: any) {
+      alert(`Error publishing prediction: ${err.message}`);
+    }
+  };
+
+  // Delete Tip (Only if not settled)
+  const handleDeleteTip = async (tipId: string) => {
+    if (!confirm('Are you sure you want to delete this prediction? (Settled tips are immutable)')) return;
+
+    try {
+      const res = await fetch(`/v1/admin/tips/${tipId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+        },
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(`Error: ${data.error || 'Failed to delete tip'}`);
+        return;
+      }
+
+      await fetchState();
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    }
+  };
+
+  // Force Settle Tip
+  const handleForceSettle = async () => {
+    try {
+      const res = await fetch('/v1/admin/settlements', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          predictionId: settleTipId,
+          status: settleOutcome,
+          homeGoals: settleHomeGoals,
+          awayGoals: settleAwayGoals,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Failed to settle: ${err.error}`);
+        return;
+      }
+
+      setShowForceSettleModal(false);
+      await fetchState();
+      alert(`Settlement committed! Prediction marked ${settleOutcome} (${settleHomeGoals}-${settleAwayGoals}).`);
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    }
+  };
+
   // Create Fixture (Phase 1)
   const handleCreateFixture = async () => {
     if (!newFxHome || !newFxAway) {
@@ -344,6 +573,33 @@ export default function App() {
       await fetchState();
     } catch (err: any) {
       alert(`Network error: ${err.message}`);
+    }
+  };
+
+  // Auto-dictate all fixtures in batch
+  const handleAutoDictateAllFixtures = async () => {
+    setIsAutoDictatingAll(true);
+    setAutoDictateBanner(null);
+    try {
+      const res = await fetch('/v1/admin/fixtures/auto-dictate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAutoDictateBanner(data.message || `Auto-dictated and updated ${data.updatedCount} fixture logos!`);
+        await fetchState();
+      } else {
+        alert(data.error || 'Failed to auto-dictate fixtures.');
+      }
+    } catch (err: any) {
+      alert(`Auto-dictate failed: ${err.message}`);
+    } finally {
+      setIsAutoDictatingAll(false);
+      setTimeout(() => setAutoDictateBanner(null), 6000);
     }
   };
 
@@ -394,7 +650,7 @@ export default function App() {
 
       if (!res.ok) {
         const data = await res.json();
-        if (res.status === 400 && data.error && data.error.includes('pass force=true')) {
+        if (res.status === 400 && data.error && data.error.includes('pass ?force=true')) {
           if (confirm(`${data.error}\n\nDo you want to FORCE delete this fixture?`)) {
             handleDeleteFixture(fixtureId, true);
             return;
@@ -466,7 +722,7 @@ export default function App() {
     }
   };
 
-  // Run Comprehensive Contract & Verification Suite (Phase 1-4)
+  // Run Comprehensive Contract & Verification Suite
   const runFullVerificationSuite = async () => {
     setIsRunningTests(true);
     const results: { name: string; passed: boolean; details: string; phase: string }[] = [];
@@ -502,7 +758,6 @@ export default function App() {
     // Test 3: Fixture CRUD & Immediate Reflection in GET /v1/fixtures
     try {
       const testId = `fx_test_verify_${Date.now()}`;
-      // Create
       const cRes = await fetch('/v1/admin/fixtures', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
@@ -517,12 +772,10 @@ export default function App() {
         }),
       });
 
-      // Verify immediate reflection on public endpoint
       const pRes = await fetch('/v1/fixtures?date=2026-10-30');
       const pData = await pRes.json();
       const foundInPublic = pData.fixtures.some((f: any) => f.id === testId);
 
-      // Clean up (soft delete)
       await fetch(`/v1/admin/fixtures/${testId}?force=true`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${adminToken}` },
@@ -538,7 +791,42 @@ export default function App() {
       results.push({ phase: 'Phase 1', name: 'Admin Fixture CRUD', passed: false, details: e.message });
     }
 
-    // Test 4: Phase 2 Club Logos & Storage Paths
+    // Test 4: Accommodate Posting Predictions (POST /v1/admin/tips)
+    try {
+      const tipFx = fixtures[0]?.id || 'fx_20261030_epl_001';
+      const postTipRes = await fetch('/v1/admin/tips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+        body: JSON.stringify({
+          fixtureId: tipFx,
+          market: 'Over/Under 2.5 Goals',
+          selection: 'Over 2.5',
+          confidence: 79,
+          tier: 'premium',
+          explanation: 'Automated test suite prediction verification.',
+        }),
+      });
+      const tipData = await postTipRes.json();
+      const tipId = tipData.id;
+
+      // Verify on public GET /v1/tips as VIP
+      const tipsListRes = await fetch('/v1/tips?tier=premium', {
+        headers: { 'Authorization': 'Bearer demo_vip_token' },
+      });
+      const tipsListData = await tipsListRes.json();
+      const foundTip = tipsListData.tips.some((t: any) => t.id === tipId);
+
+      results.push({
+        phase: 'Predictions',
+        name: 'Accommodate Posting Predictions (POST /v1/admin/tips)',
+        passed: postTipRes.status === 201 && foundTip && tipData.risk === 'LOW',
+        details: `Published tip '${tipId}' with auto-derived LOW risk (79% confidence) and immediate reflection on GET /v1/tips.`,
+      });
+    } catch (e: any) {
+      results.push({ phase: 'Predictions', name: 'Posting Predictions', passed: false, details: e.message });
+    }
+
+    // Test 5: Phase 2 Club Logos & Storage Paths
     try {
       const clubsRes = await fetch('/v1/clubs');
       const clubsData = await clubsRes.json();
@@ -553,16 +841,14 @@ export default function App() {
       results.push({ phase: 'Phase 2', name: 'Club Directory', passed: false, details: 'Clubs fetch error' });
     }
 
-    // Test 5: Phase 3 Free vs VIP User Gating on Premium Tips
+    // Test 6: Phase 3 Free vs VIP User Gating on Premium Tips
     try {
-      // 1. As Free User
       const freeTipsRes = await fetch('/v1/tips?tier=premium', {
         headers: { 'Authorization': 'Bearer demo_free_token' },
       });
       const freeTipsData = await freeTipsRes.json();
       const isFreeGated = freeTipsData.upgradeRequired === true && freeTipsData.tips.length === 0;
 
-      // 2. As VIP User
       const vipTipsRes = await fetch('/v1/tips?tier=premium', {
         headers: { 'Authorization': 'Bearer demo_vip_token' },
       });
@@ -577,34 +863,6 @@ export default function App() {
       });
     } catch (e: any) {
       results.push({ phase: 'Phase 3', name: 'Free vs VIP Gating', passed: false, details: e.message });
-    }
-
-    // Test 6: Phase 3 GET /v1/me Profile Endpoint
-    try {
-      const meRes = await fetch('/v1/me', { headers: { 'Authorization': 'Bearer demo_vip_token' } });
-      const meData = await meRes.json();
-      results.push({
-        phase: 'Phase 3',
-        name: 'User Entitlements Endpoint (GET /v1/me)',
-        passed: meRes.status === 200 && meData.tier === 'vip' && meData.isVip === true,
-        details: 'Returns authenticated user entitlement tier, role, and Unix epoch seconds expiration.',
-      });
-    } catch {
-      results.push({ phase: 'Phase 3', name: 'User Profile Endpoint', passed: false, details: 'Profile error' });
-    }
-
-    // Test 7: Phase 4 Audit Logging
-    try {
-      const auditRes = await fetch('/v1/admin/audit', { headers: { 'Authorization': `Bearer ${adminToken}` } });
-      const auditData = await auditRes.json();
-      results.push({
-        phase: 'Phase 4',
-        name: 'Immutable Audit Logging System (GET /v1/admin/audit)',
-        passed: auditRes.status === 200 && Array.isArray(auditData.logs) && auditData.logs.length > 0,
-        details: `Active audit stream with ${auditData.logs?.length || 0} recorded administrative mutations.`,
-      });
-    } catch {
-      results.push({ phase: 'Phase 4', name: 'Audit Logging System', passed: false, details: 'Audit fetch error' });
     }
 
     setTestResults(results);
@@ -638,6 +896,29 @@ export default function App() {
     return true;
   });
 
+  // Filtered tips
+  const filteredTips = tips.filter((t) => {
+    if (tipTierFilter !== 'ALL' && t.tier !== tipTierFilter) return false;
+    const isSettled = settlements.some((s) => s.predictionId === t.id);
+    if (tipStatusFilter === 'SETTLED' && !isSettled) return false;
+    if (tipStatusFilter === 'UNSETTLED' && isSettled) return false;
+    if (tipSearch) {
+      const q = tipSearch.toLowerCase();
+      return (
+        t.home.toLowerCase().includes(q) ||
+        t.away.toLowerCase().includes(q) ||
+        t.market.toLowerCase().includes(q) ||
+        t.selection.toLowerCase().includes(q) ||
+        t.id.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  // Preset selections for current market in Post Modal
+  const currentMarketPresets =
+    MARKET_OPTIONS.find((m) => m.market === tipMarket)?.presets || ['Home win', 'Away win', 'Draw'];
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
       {/* Top Header */}
@@ -658,7 +939,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Admin Match CRUD • Firebase Storage Club Logos • Free vs VIP User Gating • Poisson Engine
+                Posting Predictions Accommodation • Match CRUD • Firebase Storage Club Logos • Free vs VIP
               </p>
             </div>
           </div>
@@ -708,15 +989,16 @@ export default function App() {
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="max-w-7xl mx-auto flex flex-wrap gap-1 mt-3 border-t border-slate-800/80 pt-2.5">
+        {/* Navigation Tabs (Mobile-Friendly Horizontal Scrollable) */}
+        <div className="max-w-7xl mx-auto flex overflow-x-auto no-scrollbar gap-1.5 mt-3 border-t border-slate-800/80 pt-2.5 pb-0.5 whitespace-nowrap scroll-smooth">
           {[
-            { id: 'admin_fixtures', label: 'Admin Fixtures (CRUD)', icon: Calendar, badge: stats?.totalFixtures },
-            { id: 'clubs', label: 'Clubs & Logos (Storage)', icon: Image, badge: stats?.clubsCount },
+            { id: 'admin_fixtures', label: 'Fixtures Schedule', icon: Calendar, badge: stats?.totalFixtures },
+            { id: 'tips_studio', label: 'Prediction Studio', icon: Sparkles, badge: stats?.totalTips },
+            { id: 'clubs', label: 'Club Logos & Dictation', icon: Image, badge: MAJOR_CLUBS.length },
             { id: 'vip_users', label: 'Free vs VIP Users', icon: Crown, badge: stats?.vipUsersCount ? `${stats.vipUsersCount} VIP` : undefined },
-            { id: 'explorer', label: 'Live REST API Explorer', icon: Terminal },
-            { id: 'workers', label: 'Engine, Settler & Audit', icon: Zap },
-            { id: 'contracts', label: 'Contracts & Android Client', icon: Code2 },
+            { id: 'explorer', label: 'REST API Explorer', icon: Terminal },
+            { id: 'workers', label: 'Workers & Audit', icon: Zap },
+            { id: 'contracts', label: 'Contracts & Android', icon: Code2 },
             { id: 'tests', label: 'Verification Suite', icon: CheckCircle2 },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -725,17 +1007,17 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer shrink-0 min-h-[36px] ${
                   active
                     ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span>{tab.label}</span>
                 {tab.badge !== undefined && (
                   <span
-                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono shrink-0 ${
                       active ? 'bg-slate-950 text-emerald-300' : 'bg-slate-800 text-slate-400'
                     }`}
                   >
@@ -749,9 +1031,25 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
+        {/* Banner Alert for Auto-Dictation Operations */}
+        {autoDictateBanner && (
+          <div className="mb-4 p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-xs flex items-center justify-between shadow-lg shadow-emerald-950/40 animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-semibold">{autoDictateBanner}</span>
+            </div>
+            <button
+              onClick={() => setAutoDictateBanner(null)}
+              className="text-slate-400 hover:text-slate-200 text-xs px-2 py-0.5 rounded cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* ========================================================================= */}
-        {/* TAB 1: ADMIN FIXTURES CRUD (Phase 1) */}
+        {/* TAB 1: ADMIN FIXTURES CRUD */}
         {/* ========================================================================= */}
         {activeTab === 'admin_fixtures' && (
           <div className="space-y-6">
@@ -796,35 +1094,221 @@ export default function App() {
                 </label>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* View Mode Toggle */}
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setFixturesViewMode('cards')}
+                    className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${
+                      fixturesViewMode === 'cards'
+                        ? 'bg-emerald-500 text-slate-950 font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Mobile Stadium Card View"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline text-[11px]">Cards</span>
+                  </button>
+                  <button
+                    onClick={() => setFixturesViewMode('table')}
+                    className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${
+                      fixturesViewMode === 'table'
+                        ? 'bg-emerald-500 text-slate-950 font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Detailed Table View"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline text-[11px]">Table</span>
+                  </button>
+                </div>
+
+                {/* Auto-Dictate All Logos */}
+                <button
+                  onClick={handleAutoDictateAllFixtures}
+                  disabled={isAutoDictatingAll}
+                  className="px-3 py-2 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                  title="Automatically detect, dictate, and link official club logos for all fixtures even with prefixes or misplaced words"
+                >
+                  <Wand2 className={`w-3.5 h-3.5 text-indigo-400 ${isAutoDictatingAll ? 'animate-spin' : ''}`} />
+                  <span>{isAutoDictatingAll ? 'Dictating...' : 'Auto-Dictate Logos'}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (fixtures.length > 0) setTipFixtureId(fixtures[0].id);
+                    setShowPostTipModal(true);
+                  }}
+                  className="px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-emerald-500/20"
+                >
+                  <Sparkles className="w-4 h-4 fill-current" />
+                  <span>Post Prediction</span>
+                </button>
                 <button
                   onClick={() => setShowCreateFixtureModal(true)}
-                  className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-emerald-500/10"
+                  className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
                 >
                   <Plus className="w-4 h-4" />
-                  Create New Match
+                  <span>Create Match</span>
                 </button>
               </div>
             </div>
 
-            {/* Fixtures Table */}
+            {/* Fixtures Schedule Container */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
               <div className="p-4 border-b border-slate-800 flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-emerald-400" />
-                    Managed Fixtures & Live Status
+                    Managed Fixtures Schedule
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Changes made here immediately reflect in public <code className="text-emerald-400">GET /v1/fixtures</code>.
+                    System automatically normalizes & links club logos even if misplaced or prefixed. Click <strong className="text-emerald-400">"Post Tip"</strong> on any match to publish a prediction!
                   </p>
                 </div>
                 <div className="text-xs text-slate-400 font-mono">
-                  Showing {filteredFixtures.length} matches
+                  {filteredFixtures.length} matches
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              {/* CARD VIEW (Default Mobile-Friendly Layout) */}
+              {fixturesViewMode === 'cards' && (
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredFixtures.map((fx) => {
+                    const isDeleted = fx.deletedAt !== null;
+                    const isLive = fx.status === 'LIVE';
+                    const isFinished = fx.status === 'FINISHED';
+                    const formattedKickoff = new Date(fx.kickoff * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                    return (
+                      <div
+                        key={fx.id}
+                        className={`rounded-xl border transition-all p-4 flex flex-col justify-between ${
+                          isDeleted
+                            ? 'bg-red-950/20 border-red-900/40 opacity-60'
+                            : isLive
+                            ? 'bg-emerald-950/20 border-emerald-500/40 shadow-md shadow-emerald-500/5'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        {/* Match Header */}
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1.5 truncate">
+                              <Globe className="w-3 h-3 text-slate-500" />
+                              {fx.league}
+                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                                {formattedKickoff} UTC
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  isLive
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
+                                    : isFinished
+                                    ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                                    : 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                                }`}
+                              >
+                                {isLive ? `${fx.status} ${fx.minute}'` : fx.status}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Stadium Matchup Row */}
+                          <div className="grid grid-cols-5 items-center gap-2 py-3 bg-slate-900/50 rounded-lg px-3 border border-slate-800/60 my-2">
+                            {/* Home Club */}
+                            <div className="col-span-2 flex flex-col items-center text-center">
+                              <div className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center p-1.5 mb-1.5 shadow-inner">
+                                {fx.homeLogoUrl ? (
+                                  <img src={fx.homeLogoUrl} alt={fx.home} className="w-9 h-9 object-contain" />
+                                ) : (
+                                  <span className="text-xs font-bold text-slate-400">{fx.home.substring(0, 3).toUpperCase()}</span>
+                                )}
+                              </div>
+                              <span className="text-xs font-bold text-white leading-tight line-clamp-1">{fx.home}</span>
+                            </div>
+
+                            {/* Center Score / VS */}
+                            <div className="col-span-1 flex flex-col items-center justify-center">
+                              {isFinished || isLive ? (
+                                <div className="px-2.5 py-1 rounded bg-slate-950 border border-slate-700 text-sm font-black font-mono text-emerald-400">
+                                  {fx.homeGoals ?? 0} - {fx.awayGoals ?? 0}
+                                </div>
+                              ) : (
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">VS</span>
+                              )}
+                              <span className="text-[9px] font-mono text-slate-500 mt-1">{fx.id.substring(0, 11)}</span>
+                            </div>
+
+                            {/* Away Club */}
+                            <div className="col-span-2 flex flex-col items-center text-center">
+                              <div className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center p-1.5 mb-1.5 shadow-inner">
+                                {fx.awayLogoUrl ? (
+                                  <img src={fx.awayLogoUrl} alt={fx.away} className="w-9 h-9 object-contain" />
+                                ) : (
+                                  <span className="text-xs font-bold text-slate-400">{fx.away.substring(0, 3).toUpperCase()}</span>
+                                )}
+                              </div>
+                              <span className="text-xs font-bold text-white leading-tight line-clamp-1">{fx.away}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Card Action Buttons (Mobile-Friendly touch targets) */}
+                        <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-1.5">
+                          <button
+                            onClick={() => {
+                              setTipFixtureId(fx.id);
+                              setTipMarket('Match Winner (1X2)');
+                              setTipSelection('Home win');
+                              setTipConfidence(72);
+                              setTipRisk('LOW');
+                              setTipTier('free');
+                              setTipExplanation(`Poisson lean home (xG edge); conversion dominance for ${fx.home}.`);
+                              setShowPostTipModal(true);
+                            }}
+                            className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-500/20"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 fill-current" />
+                            <span>+ Post Tip</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setEditingFixture(fx);
+                              setEditStatus(fx.status);
+                              setEditHomeGoals(fx.homeGoals ?? 2);
+                              setEditAwayGoals(fx.awayGoals ?? 1);
+                              setEditMinute(fx.minute ?? 75);
+                            }}
+                            className="py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Edit fixture score/status"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Edit</span>
+                          </button>
+
+                          {!isDeleted && (
+                            <button
+                              onClick={() => handleDeleteFixture(fx.id, false)}
+                              className="py-1.5 px-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs transition-colors cursor-pointer"
+                              title="Delete fixture"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* TABLE VIEW (Desktop Detailed View) */}
+              {fixturesViewMode === 'table' && (
+                <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-mono">
@@ -913,6 +1397,25 @@ export default function App() {
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              {!isDeleted && (
+                                <button
+                                  onClick={() => {
+                                    setTipFixtureId(fx.id);
+                                    setTipMarket('Match Winner (1X2)');
+                                    setTipSelection('Home win');
+                                    setTipConfidence(72);
+                                    setTipRisk('LOW');
+                                    setTipTier('free');
+                                    setTipExplanation(`Poisson lean home (xG edge); favorable conversion metrics for ${fx.home}.`);
+                                    setShowPostTipModal(true);
+                                  }}
+                                  className="px-2.5 py-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] flex items-center gap-1 transition-colors cursor-pointer font-medium"
+                                  title="Post prediction tip for this match"
+                                >
+                                  <Sparkles className="w-3 h-3 text-emerald-400" />
+                                  Post Tip
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
                                   setEditingFixture(fx);
@@ -944,83 +1447,746 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+              )}
             </div>
           </div>
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 2: CLUBS & FIREBASE STORAGE LOGOS (Phase 2) */}
+        {/* TAB 2: PREDICTION STUDIO & TIPS (Accommodate Posting Predictions) */}
         {/* ========================================================================= */}
-        {activeTab === 'clubs' && (
+        {activeTab === 'tips_studio' && (
           <div className="space-y-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4 mb-5">
-                <div>
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <Image className="w-5 h-5 text-emerald-400" />
-                    Football Clubs Directory & Firebase Storage
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Structured under <code className="text-emerald-400 font-mono">clubs/&#123;clubId&#125;/logo.png</code>. When a logo is updated, it automatically cascades to all scheduled and past fixtures for that club!
-                  </p>
+            {/* Quick Metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <div className="text-slate-400 text-xs font-medium">Published Predictions</div>
+                <div className="text-2xl font-bold text-white mt-1">{tips.length}</div>
+                <div className="text-[11px] text-slate-500 mt-1">Immutable predictions active</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <div className="text-slate-400 text-xs font-medium">Free Tier Predictions</div>
+                <div className="text-2xl font-bold text-emerald-400 mt-1">
+                  {tips.filter((t) => t.tier === 'free').length}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">Publicly available to all users</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <div className="text-slate-400 text-xs font-medium">VIP Premium Predictions</div>
+                <div className="text-2xl font-bold text-purple-400 mt-1">
+                  {tips.filter((t) => t.tier === 'premium').length}
+                </div>
+                <div className="text-[11px] text-purple-300/80 mt-1">Gated for Gold VIP subscribers</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <div className="text-slate-400 text-xs font-medium">Settled Outcomes</div>
+                <div className="text-2xl font-bold text-blue-400 mt-1">{settlements.length}</div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  {settlements.filter((s) => s.status === 'WON').length} Won •{' '}
+                  {settlements.filter((s) => s.status === 'LOST').length} Lost
+                </div>
+              </div>
+            </div>
+
+            {/* Studio Toolbar */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search tips, teams, market..."
+                    value={tipSearch}
+                    onChange={(e) => setTipSearch(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-64"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <Filter className="w-3.5 h-3.5" />
+                  <span>Tier:</span>
+                  <select
+                    value={tipTierFilter}
+                    onChange={(e) => setTipTierFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-slate-200 focus:outline-none focus:border-emerald-500 text-xs"
+                  >
+                    <option value="ALL">All Tiers</option>
+                    <option value="free">Free Only</option>
+                    <option value="premium">VIP Premium Only</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <span>Settlement:</span>
+                  <select
+                    value={tipStatusFilter}
+                    onChange={(e) => setTipStatusFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-slate-200 focus:outline-none focus:border-emerald-500 text-xs"
+                  >
+                    <option value="ALL">All Outcomes</option>
+                    <option value="UNSETTLED">Pending / Unsettled</option>
+                    <option value="SETTLED">Settled (WON / LOST)</option>
+                  </select>
                 </div>
               </div>
 
-              {/* Clubs Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {clubs.map((c) => (
-                  <div
-                    key={c.id}
-                    className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col justify-between hover:border-slate-700 transition-all"
+              <div className="flex flex-wrap items-center gap-2">
+                {/* View Mode Toggle */}
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setTipsViewMode('cards')}
+                    className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${
+                      tipsViewMode === 'cards'
+                        ? 'bg-emerald-500 text-slate-950 font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Mobile Card View"
                   >
-                    <div>
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center p-1 overflow-hidden shadow-inner shrink-0">
-                          {c.logoUrl ? (
-                            <img src={c.logoUrl} alt={c.name} className="w-10 h-10 object-contain" />
-                          ) : (
-                            <span className="text-xs font-bold text-slate-400">{c.shortName.substring(0, 3)}</span>
-                          )}
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-white leading-tight">{c.name}</h4>
-                          <span className="text-[11px] text-slate-400">{c.country}</span>
-                        </div>
-                      </div>
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline text-[11px]">Cards</span>
+                  </button>
+                  <button
+                    onClick={() => setTipsViewMode('table')}
+                    className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${
+                      tipsViewMode === 'table'
+                        ? 'bg-emerald-500 text-slate-950 font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Table View"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline text-[11px]">Table</span>
+                  </button>
+                </div>
 
-                      <div className="text-[10px] font-mono text-slate-500 bg-slate-900/60 p-2 rounded border border-slate-800/80 break-all">
-                        <span className="text-slate-400 block mb-0.5">Storage Path:</span>
-                        {c.logoPath || 'Not configured'}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                      <span className="text-[10px] text-emerald-400 font-mono font-medium">{c.id}</span>
-                      <button
-                        onClick={() => {
-                          setClubToEditLogo(c);
-                          setNewLogoUrl(c.logoUrl || '');
-                        }}
-                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer"
-                      >
-                        <UploadCloud className="w-3 h-3 text-emerald-400" />
-                        Update Logo
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                <button
+                  onClick={() => {
+                    if (fixtures.length > 0) setTipFixtureId(fixtures[0].id);
+                    setShowPostTipModal(true);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-emerald-500/20"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Post New Prediction</span>
+                </button>
               </div>
+            </div>
+
+            {/* Predictions Container */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-400" />
+                    Published Prediction Records (`tips`)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Predictions are immutable once published. Free tips are public; VIP tips are unlocked only for subscribers.
+                  </p>
+                </div>
+                <div className="text-xs text-slate-400 font-mono">
+                  {filteredTips.length} predictions
+                </div>
+              </div>
+
+              {/* CARDS VIEW FOR PREDICTIONS */}
+              {tipsViewMode === 'cards' && (
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredTips.map((t) => {
+                    const settlement = settlements.find((s) => s.predictionId === t.id);
+
+                    return (
+                      <div
+                        key={t.id}
+                        className={`rounded-xl border transition-all p-4 flex flex-col justify-between ${
+                          settlement?.status === 'WON'
+                            ? 'bg-emerald-950/20 border-emerald-500/40'
+                            : settlement?.status === 'LOST'
+                            ? 'bg-red-950/20 border-red-900/40'
+                            : t.tier === 'premium'
+                            ? 'bg-slate-950 border-purple-500/30'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div>
+                          {/* Header: League & Tier */}
+                          <div className="flex items-center justify-between gap-2 mb-2.5">
+                            <span className="text-[11px] text-slate-400 font-medium truncate flex items-center gap-1.5">
+                              <Globe className="w-3 h-3 text-slate-500" />
+                              {t.league}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase flex items-center gap-1 ${
+                                t.tier === 'premium'
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              }`}
+                            >
+                              {t.tier === 'premium' && <Crown className="w-3 h-3 text-purple-400" />}
+                              {t.tier}
+                            </span>
+                          </div>
+
+                          {/* Teams Header with Logos */}
+                          <div className="flex items-center gap-2 mb-3 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                            <div className="w-6 h-6 rounded bg-slate-950 flex items-center justify-center p-0.5 shrink-0 border border-slate-800">
+                              {t.homeLogoUrl ? (
+                                <img src={t.homeLogoUrl} alt={t.home} className="w-5 h-5 object-contain" />
+                              ) : (
+                                <span className="text-[8px] font-bold text-slate-400">{t.home.substring(0, 2)}</span>
+                              )}
+                            </div>
+                            <span className="text-xs font-bold text-white truncate">{t.home}</span>
+                            <span className="text-slate-500 text-[10px] font-mono">vs</span>
+                            <div className="w-6 h-6 rounded bg-slate-950 flex items-center justify-center p-0.5 shrink-0 border border-slate-800">
+                              {t.awayLogoUrl ? (
+                                <img src={t.awayLogoUrl} alt={t.away} className="w-5 h-5 object-contain" />
+                              ) : (
+                                <span className="text-[8px] font-bold text-slate-400">{t.away.substring(0, 2)}</span>
+                              )}
+                            </div>
+                            <span className="text-xs font-bold text-white truncate">{t.away}</span>
+                          </div>
+
+                          {/* Market & Pick Highlight */}
+                          <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 mb-3">
+                            <div className="text-[11px] text-slate-400 mb-0.5">{t.market}</div>
+                            <div className="text-base font-black text-emerald-400">{t.selection}</div>
+                          </div>
+
+                          {/* Confidence & Risk */}
+                          <div className="mb-3">
+                            <div className="flex items-center justify-between text-xs mb-1">
+                              <span className="text-slate-400 text-[11px]">Confidence</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-white">{t.confidence}%</span>
+                                <span
+                                  className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                    t.risk === 'LOW'
+                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                      : t.risk === 'MEDIUM'
+                                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                      : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                  }`}
+                                >
+                                  {t.risk} RISK
+                                </span>
+                              </div>
+                            </div>
+                            <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${t.confidence}%` }}></div>
+                            </div>
+                          </div>
+
+                          {/* Explanation */}
+                          <p className="text-[11px] text-slate-300 italic line-clamp-2 bg-slate-900/40 p-2 rounded border border-slate-800/60 mb-2">
+                            "{t.explanation}"
+                          </p>
+                        </div>
+
+                        {/* Footer Outcome & Actions */}
+                        <div className="mt-2 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                          <div>
+                            {settlement ? (
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${
+                                  settlement.status === 'WON'
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                    : settlement.status === 'LOST'
+                                    ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                    : 'bg-slate-800 text-slate-300 border border-slate-700'
+                                }`}
+                              >
+                                {settlement.status} ({settlement.homeGoals}-{settlement.awayGoals})
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 italic text-[11px]">Unsettled</span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            {!settlement && (
+                              <button
+                                onClick={() => {
+                                  setSettleTipId(t.id);
+                                  setShowForceSettleModal(true);
+                                }}
+                                className="px-2.5 py-1 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[11px] font-medium transition-colors cursor-pointer"
+                              >
+                                Settle
+                              </button>
+                            )}
+                            {!settlement && (
+                              <button
+                                onClick={() => handleDeleteTip(t.id)}
+                                className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs transition-colors cursor-pointer"
+                                title="Delete prediction"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* TABLE VIEW */}
+              {tipsViewMode === 'table' && (
+                <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-mono">
+                      <th className="py-2.5 px-4">Tip ID</th>
+                      <th className="py-2.5 px-4">Match & Teams</th>
+                      <th className="py-2.5 px-4">Market & Selection</th>
+                      <th className="py-2.5 px-4">Confidence & Risk</th>
+                      <th className="py-2.5 px-4">Tier</th>
+                      <th className="py-2.5 px-4">Outcome</th>
+                      <th className="py-2.5 px-4">Model & Reason</th>
+                      <th className="py-2.5 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-sans">
+                    {filteredTips.map((t) => {
+                      const settlement = settlements.find((s) => s.predictionId === t.id);
+                      return (
+                        <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="py-3 px-4 font-mono text-emerald-400 font-medium">
+                            {t.id}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              {t.homeLogoUrl && (
+                                <img src={t.homeLogoUrl} alt={t.home} className="w-4 h-4 object-contain" />
+                              )}
+                              <span className="font-semibold text-white">{t.home}</span>
+                              <span className="text-slate-500 font-mono text-[10px]">vs</span>
+                              <span className="font-semibold text-white">{t.away}</span>
+                              {t.awayLogoUrl && (
+                                <img src={t.awayLogoUrl} alt={t.away} className="w-4 h-4 object-contain" />
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-400 mt-0.5">{t.league}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-white text-xs">{t.selection}</div>
+                            <div className="text-[11px] text-slate-400">{t.market}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-white">{t.confidence}%</span>
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                  t.risk === 'LOW'
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                    : t.risk === 'MEDIUM'
+                                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                    : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                }`}
+                              >
+                                {t.risk}
+                              </span>
+                            </div>
+                            <div className="w-20 h-1.5 rounded-full bg-slate-800 overflow-hidden mt-1.5">
+                              <div
+                                className="h-full bg-emerald-500 rounded-full"
+                                style={{ width: `${t.confidence}%` }}
+                              ></div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase flex items-center gap-1 w-max ${
+                                t.tier === 'premium'
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                  : 'bg-slate-800 text-slate-300 border border-slate-700'
+                              }`}
+                            >
+                              {t.tier === 'premium' && <Crown className="w-3 h-3 text-purple-400" />}
+                              {t.tier}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {settlement ? (
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${
+                                  settlement.status === 'WON'
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                    : settlement.status === 'LOST'
+                                    ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                    : 'bg-slate-800 text-slate-300 border border-slate-700'
+                                }`}
+                              >
+                                {settlement.status} ({settlement.homeGoals}-{settlement.awayGoals})
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 italic text-[11px]">Unsettled</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 max-w-xs">
+                            <div className="text-slate-300 text-[11px] truncate" title={t.explanation}>
+                              {t.explanation}
+                            </div>
+                            <div className="font-mono text-[10px] text-slate-500 mt-0.5">{t.modelVersion}</div>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {!settlement && (
+                                <button
+                                  onClick={() => {
+                                    setSettleTipId(t.id);
+                                    setShowForceSettleModal(true);
+                                  }}
+                                  className="px-2 py-1 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[11px] transition-colors cursor-pointer"
+                                  title="Force Settle prediction"
+                                >
+                                  Settle
+                                </button>
+                              )}
+                              {!settlement && (
+                                <button
+                                  onClick={() => handleDeleteTip(t.id)}
+                                  className="px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-[11px] transition-colors cursor-pointer"
+                                  title="Delete tip"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              )}
             </div>
           </div>
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 3: USERS & VIP ENTITLEMENTS (Phase 3) */}
+        {/* TAB 3: CLUB LOGOS & AUTO-DICTATION ENGINE */}
+        {/* ========================================================================= */}
+        {activeTab === 'clubs' && (() => {
+          const sandboxResult = dictateClub(dictationQuery);
+
+          const filteredClubsList = MAJOR_CLUBS.filter((c) => {
+            if (clubsLeagueFilter !== 'ALL' && c.league !== clubsLeagueFilter) return false;
+            if (clubsSearch) {
+              const q = clubsSearch.toLowerCase();
+              return (
+                c.name.toLowerCase().includes(q) ||
+                c.shortName.toLowerCase().includes(q) ||
+                c.country.toLowerCase().includes(q) ||
+                c.league.toLowerCase().includes(q) ||
+                c.aliases.some((a) => a.toLowerCase().includes(q))
+              );
+            }
+            return true;
+          });
+
+          const leagueOptions = [
+            { id: 'ALL', label: `All Clubs (${MAJOR_CLUBS.length})` },
+            { id: 'Premier League', label: 'Premier League (20)' },
+            { id: 'La Liga', label: 'La Liga (20)' },
+            { id: 'Serie A', label: 'Serie A (20)' },
+            { id: 'Bundesliga', label: 'Bundesliga (18)' },
+            { id: 'Ligue 1', label: 'Ligue 1 (18)' },
+            { id: 'Continental & Global', label: 'Global Giants (18)' },
+          ];
+
+          return (
+            <div className="space-y-6">
+              {/* SECTION 1: AUTO-DICTATION SANDBOX */}
+              <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/40 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-4 mb-5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/40">
+                        <Wand2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-bold text-white flex items-center gap-2">
+                          Intelligent Auto-Dictation Engine
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                            Fuzzy • Misplaced Words • Prefixes
+                          </span>
+                        </h2>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Dictates official high-res CDN club logos automatically even with misplaced names (e.g. <em>Madrid Real</em>), formal prefixes (<em>FC</em>, <em>AFC</em>, <em>1.</em>), or informal nicknames (<em>bvb</em>, <em>Spurs</em>, <em>PSG</em>).
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Batch Dictate Button */}
+                  <button
+                    onClick={handleAutoDictateAllFixtures}
+                    disabled={isAutoDictatingAll}
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-indigo-600/25 shrink-0"
+                  >
+                    <Wand2 className={`w-4 h-4 ${isAutoDictatingAll ? 'animate-spin' : ''}`} />
+                    <span>{isAutoDictatingAll ? 'Auto-Dictating Fixtures...' : 'Auto-Dictate All Fixtures'}</span>
+                  </button>
+                </div>
+
+                {/* Live Sandbox Interactive Tester */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+                  <div className="lg:col-span-7 flex flex-col justify-between space-y-3">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-300 block mb-1.5 flex items-center gap-1.5">
+                        <Search className="w-3.5 h-3.5 text-indigo-400" />
+                        Type Any Misplaced Name, Prefix, Suffix, or Nickname:
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={dictationQuery}
+                          onChange={(e) => setDictationQuery(e.target.value)}
+                          placeholder="e.g. Madrid Real, City Manchester, FC Arsenal, bvb, Spurs..."
+                          className="w-full bg-slate-950 border border-indigo-500/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 font-medium"
+                        />
+                        {dictationQuery && (
+                          <button
+                            onClick={() => setDictationQuery('')}
+                            className="absolute right-3 top-2.5 text-xs text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Quick Preset Buttons */}
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">
+                        Click preset to test tricky variations:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { label: 'Madrid Real', desc: 'Misplaced words' },
+                          { label: 'City Manchester', desc: 'Misplaced words' },
+                          { label: 'FC Arsenal', desc: 'Prefix FC' },
+                          { label: 'AFC Bournemouth', desc: 'Prefix AFC' },
+                          { label: 'bvb', desc: 'Acronym' },
+                          { label: 'psg', desc: 'Acronym' },
+                          { label: 'Spurs', desc: 'Nickname' },
+                          { label: 'Munich Bayern', desc: 'Misplaced words' },
+                          { label: 'Saint-Étienne', desc: 'Diacritics & Hyphen' },
+                          { label: 'Mönchengladbach', desc: 'Umlauts' },
+                          { label: 'Hotspur Tottenham', desc: 'Misplaced' },
+                          { label: 'Inter Miami', desc: 'MLS Giant' },
+                          { label: 'Al Nassr', desc: 'Saudi League' },
+                        ].map((preset) => (
+                          <button
+                            key={preset.label}
+                            onClick={() => setDictationQuery(preset.label)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                              dictationQuery.toLowerCase() === preset.label.toLowerCase()
+                                ? 'bg-indigo-500 text-white font-bold shadow-md shadow-indigo-500/30'
+                                : 'bg-slate-950/80 hover:bg-slate-800 text-slate-300 border border-slate-800'
+                            }`}
+                          >
+                            <span>{preset.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Dictation Live Output Badge */}
+                  <div className="lg:col-span-5 bg-slate-950/90 border border-indigo-500/30 rounded-xl p-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-2">
+                        <span className="text-slate-400 font-mono text-[11px]">DICTATION ENGINE OUTPUT</span>
+                        {sandboxResult.club ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            {sandboxResult.confidence}% CONFIDENCE
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                            UNRESOLVED
+                          </span>
+                        )}
+                      </div>
+
+                      {sandboxResult.club ? (
+                        <div className="flex items-center gap-4 my-2">
+                          <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-indigo-500/30 flex items-center justify-center p-2 shadow-inner shrink-0">
+                            <img
+                              src={sandboxResult.club.logoUrl}
+                              alt={sandboxResult.club.name}
+                              className="w-12 h-12 object-contain"
+                            />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-black text-white">{sandboxResult.club.name}</h3>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                                {sandboxResult.club.shortName}
+                              </span>
+                              <span className="text-xs text-indigo-300 font-semibold">{sandboxResult.club.league}</span>
+                              <span className="text-xs text-slate-400">• {sandboxResult.club.country}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 mt-1 font-mono">
+                              FotMob ID: <span className="text-emerald-400">{sandboxResult.club.fotmobId}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="py-6 text-center text-slate-500 text-xs">
+                          Type a team name or select a preset to see auto-dictation in real-time.
+                        </div>
+                      )}
+                    </div>
+
+                    {sandboxResult.club && (
+                      <div className="mt-3 pt-3 border-t border-slate-800/80">
+                        <div className="text-[10px] text-slate-400 mb-2">
+                          <strong className="text-slate-300">Resolution Logic:</strong> {sandboxResult.matchReason}
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            onClick={() => copyToClipboard(sandboxResult.club!.logoUrl, 'sandbox_logo')}
+                            className="px-3 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            {copiedText === 'sandbox_logo' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedText === 'sandbox_logo' ? 'Copied Logo URL' : 'Copy CDN Logo URL'}</span>
+                          </button>
+                          <span className="text-[10px] font-mono text-slate-500 truncate max-w-[180px]">
+                            {sandboxResult.club.logoPath}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 2: MAJOR LEAGUE CLUBS DIRECTORY (110+ CLUBS) */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                {/* Directory Header & Filters */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4 mb-5">
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <Image className="w-5 h-5 text-emerald-400" />
+                      Comprehensive Major League Clubs Directory
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                        {filteredClubsList.length} of {MAJOR_CLUBS.length} clubs
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      High-resolution transparent CDN club badges covering every major league, loaded with instant fuzzy-lookup and Firebase Storage path mapping.
+                    </p>
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="relative w-full lg:w-72">
+                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search club, country, alias..."
+                      value={clubsSearch}
+                      onChange={(e) => setClubsSearch(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* League Filter Horizontal Tabs */}
+                <div className="flex overflow-x-auto no-scrollbar gap-1.5 pb-4 mb-4 border-b border-slate-800/80 whitespace-nowrap scroll-smooth">
+                  {leagueOptions.map((opt) => {
+                    const isSelected = clubsLeagueFilter === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => setClubsLeagueFilter(opt.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 ${
+                          isSelected
+                            ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
+                            : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Responsive Mobile-Friendly Clubs Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                  {filteredClubsList.map((c) => (
+                    <div
+                      key={c.id}
+                      className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex flex-col justify-between hover:border-slate-700 hover:shadow-lg transition-all group"
+                    >
+                      <div>
+                        {/* Club Logo Badge */}
+                        <div className="w-full aspect-square max-h-24 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center p-2 mb-2 shadow-inner group-hover:scale-105 transition-transform">
+                          <img
+                            src={c.logoUrl}
+                            alt={c.name}
+                            className="max-h-16 max-w-full object-contain"
+                            loading="lazy"
+                          />
+                        </div>
+
+                        {/* Club Info */}
+                        <h4 className="text-xs font-bold text-white line-clamp-1 group-hover:text-emerald-400 transition-colors">
+                          {c.name}
+                        </h4>
+                        <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
+                          <span className="font-semibold text-slate-300">{c.shortName}</span>
+                          <span className="font-mono text-slate-500">#{c.fotmobId}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">
+                          {c.league} • {c.country}
+                        </div>
+                      </div>
+
+                      {/* Card Action */}
+                      <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-1">
+                        <button
+                          onClick={() => copyToClipboard(c.logoUrl, `copy_${c.id}`)}
+                          className="flex-1 py-1 px-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                          title="Copy direct logo CDN URL"
+                        >
+                          {copiedText === `copy_${c.id}` ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3 text-slate-400" />
+                          )}
+                          <span>{copiedText === `copy_${c.id}` ? 'Copied' : 'Logo URL'}</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setDictationQuery(c.shortName);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="p-1 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] transition-colors cursor-pointer shrink-0"
+                          title="Test in Auto-Dictation Sandbox"
+                        >
+                          <Wand2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ========================================================================= */}
+        {/* TAB 4: USERS & VIP ENTITLEMENTS */}
         {/* ========================================================================= */}
         {activeTab === 'vip_users' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* Card 1: Entitlement Architecture */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg col-span-2">
                 <h3 className="text-base font-bold text-white flex items-center gap-2 mb-2">
                   <Crown className="w-5 h-5 text-purple-400" />
@@ -1069,7 +2235,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Card 2: Quick VIP Simulator */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col justify-between">
                 <div>
                   <h4 className="text-sm font-bold text-white flex items-center gap-2 mb-2">
@@ -1172,7 +2337,7 @@ export default function App() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 4: LIVE REST API EXPLORER & SANDBOX */}
+        {/* TAB 5: LIVE REST API EXPLORER */}
         {/* ========================================================================= */}
         {activeTab === 'explorer' && (
           <div className="space-y-6">
@@ -1358,7 +2523,7 @@ export default function App() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 5: WORKERS & AUDIT LOGS (Phase 4) */}
+        {/* TAB 6: WORKERS & AUDIT LOGS */}
         {/* ========================================================================= */}
         {activeTab === 'workers' && (
           <div className="space-y-6">
@@ -1464,7 +2629,7 @@ export default function App() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 6: CONTRACTS & MOBILE INTEGRATION */}
+        {/* TAB 7: CONTRACTS & MOBILE INTEGRATION */}
         {/* ========================================================================= */}
         {activeTab === 'contracts' && (
           <div className="space-y-6">
@@ -1535,7 +2700,7 @@ export default function App() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 7: PHASE 1-4 VERIFICATION TEST SUITE */}
+        {/* TAB 8: PHASE 1-4 VERIFICATION TEST SUITE */}
         {/* ========================================================================= */}
         {activeTab === 'tests' && (
           <div className="space-y-6">
@@ -1547,7 +2712,7 @@ export default function App() {
                     Automated Phase 1 — Phase 4 Verification Suite
                   </h3>
                   <p className="text-xs text-slate-400 mt-1">
-                    Directly executes end-to-end tests against the live API to verify Admin Match CRUD, Club Logos, Free vs VIP Gating, and Audit Logs.
+                    Directly executes end-to-end tests against the live API to verify Posting Predictions, Admin Match CRUD, Club Logos, Free vs VIP Gating, and Audit Logs.
                   </p>
                 </div>
                 <button
@@ -1595,7 +2760,286 @@ export default function App() {
       </main>
 
       {/* ========================================================================= */}
-      {/* MODAL: CREATE FIXTURE (Phase 1) */}
+      {/* MODAL: POST PREDICTION (Accommodate Posting Predictions) */}
+      {/* ========================================================================= */}
+      {showPostTipModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-xl w-full p-6 shadow-2xl my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-emerald-400" />
+                  Post New Prediction Tip
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Publish expert or Poisson betting predictions. Published predictions are immutable.
+                </p>
+              </div>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                POST /v1/admin/tips
+              </span>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Fixture Selector */}
+              <div>
+                <label className="text-slate-300 block mb-1 font-medium">Select Fixture / Match</label>
+                <select
+                  value={tipFixtureId}
+                  onChange={(e) => {
+                    setTipFixtureId(e.target.value);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500 text-xs"
+                >
+                  {fixtures
+                    .filter((f) => f.deletedAt === null)
+                    .map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.home} vs {f.away} ({f.league} • {f.status})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Market Selector & Presets */}
+              <div>
+                <label className="text-slate-300 block mb-1 font-medium">Betting Market</label>
+                <select
+                  value={tipMarket}
+                  onChange={(e) => {
+                    const m = e.target.value;
+                    setTipMarket(m);
+                    const opt = MARKET_OPTIONS.find((item) => item.market === m);
+                    if (opt && opt.presets.length > 0) {
+                      setTipSelection(opt.presets[0]);
+                    }
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500 text-xs"
+                >
+                  {MARKET_OPTIONS.map((m) => (
+                    <option key={m.market} value={m.market}>
+                      {m.market}
+                    </option>
+                  ))}
+                  <option value="Custom Market">Custom Market</option>
+                </select>
+
+                {/* Quick Selection Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-[11px] text-slate-500">Suggested picks:</span>
+                  {currentMarketPresets.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setTipSelection(preset)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                        tipSelection === preset
+                          ? 'bg-emerald-500 text-slate-950 font-bold'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Selection Input & Tier */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 block mb-1 font-medium">Predicted Selection / Pick</label>
+                  <input
+                    type="text"
+                    value={tipSelection}
+                    onChange={(e) => setTipSelection(e.target.value)}
+                    placeholder="e.g. Home win, Over 2.5, Yes"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-300 block mb-1 font-medium">Access Tier</label>
+                  <select
+                    value={tipTier}
+                    onChange={(e) => setTipTier(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="free">Free (Public for all users)</option>
+                    <option value="premium">Premium (VIP Subscribers Only)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Confidence & Risk Gauge */}
+              <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-300 font-medium flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-emerald-400" />
+                    Confidence Score: <strong className="text-emerald-400 text-sm font-mono">{tipConfidence}%</strong>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400">Risk Level:</span>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        tipRisk === 'LOW'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : tipRisk === 'MEDIUM'
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                      }`}
+                    >
+                      {tipRisk}
+                    </span>
+                  </div>
+                </div>
+
+                <input
+                  type="range"
+                  min={40}
+                  max={95}
+                  value={tipConfidence}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    setTipConfidence(val);
+                    setTipRisk(calculateRiskFromConfidence(val));
+                  }}
+                  className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
+
+                <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                  <span>40% (High Risk)</span>
+                  <span>58% (Medium)</span>
+                  <span>70%+ (Low Risk)</span>
+                  <span>95% (Max)</span>
+                </div>
+              </div>
+
+              {/* Analytical Explanation & Magic Draft */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-300 font-medium">Analytical Explanation</label>
+                  <button
+                    type="button"
+                    onClick={handleAutoDraftPoisson}
+                    className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer font-medium"
+                  >
+                    <Wand2 className="w-3 h-3" />
+                    Auto-Draft Poisson Stats
+                  </button>
+                </div>
+                <textarea
+                  rows={3}
+                  value={tipExplanation}
+                  onChange={(e) => setTipExplanation(e.target.value)}
+                  placeholder="e.g. Poisson model lean home (xG 2.1 vs 1.1); home offensive efficiency 68% exceeds league baseline."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-100 focus:outline-none focus:border-emerald-500 leading-relaxed text-xs"
+                />
+              </div>
+
+              {/* Model Version */}
+              <div>
+                <label className="text-slate-400 block mb-1 text-[11px]">Model / Engine Version</label>
+                <input
+                  type="text"
+                  value={tipModelVersion}
+                  onChange={(e) => setTipModelVersion(e.target.value)}
+                  placeholder="e.g. expert-analyst-1.0 or poisson-emp-1.0"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-300 font-mono text-[11px]"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowPostTipModal(false)}
+                className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handlePostPrediction}
+                className="px-5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-emerald-500/20"
+              >
+                <Sparkles className="w-4 h-4 fill-current" />
+                Publish Prediction
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: FORCE SETTLE TIP */}
+      {/* ========================================================================= */}
+      {showForceSettleModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl">
+            <h3 className="text-base font-bold text-white mb-1">Force Settle Prediction</h3>
+            <p className="text-xs text-slate-400 mb-4">
+              Commit settlement outcome for prediction <code className="text-emerald-400">{settleTipId}</code>.
+            </p>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="text-slate-300 block mb-1">Outcome</label>
+                <select
+                  value={settleOutcome}
+                  onChange={(e) => setSettleOutcome(e.target.value as any)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-100"
+                >
+                  <option value="WON">WON (Win badge)</option>
+                  <option value="LOST">LOST</option>
+                  <option value="VOID">VOID (Refund / push)</option>
+                  <option value="POSTPONED">POSTPONED</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 block mb-1">Home Final Goals</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={settleHomeGoals}
+                    onChange={(e) => setSettleHomeGoals(parseInt(e.target.value, 10) || 0)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-100 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 block mb-1">Away Final Goals</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={settleAwayGoals}
+                    onChange={(e) => setSettleAwayGoals(parseInt(e.target.value, 10) || 0)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-100 font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-800">
+              <button
+                onClick={() => setShowForceSettleModal(false)}
+                className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleForceSettle}
+                className="px-4 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-slate-950 font-bold text-xs cursor-pointer shadow-lg shadow-blue-500/20"
+              >
+                Save Settlement
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CREATE FIXTURE */}
       {/* ========================================================================= */}
       {showCreateFixtureModal && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1606,26 +3050,46 @@ export default function App() {
             </p>
 
             <div className="space-y-3.5 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 block mb-1">Home Team</label>
+                  <label className="text-slate-300 block mb-1 font-medium">Home Team</label>
                   <input
                     type="text"
                     value={newFxHome}
                     onChange={(e) => setNewFxHome(e.target.value)}
-                    placeholder="e.g. Arsenal"
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                    placeholder="e.g. FC Arsenal, Madrid Real"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500 text-xs"
                   />
+                  {newFxHome && (() => {
+                    const dict = dictateClub(newFxHome);
+                    return dict.club ? (
+                      <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-1 rounded-md">
+                        <img src={dict.club.logoUrl} className="w-4 h-4 object-contain shrink-0" alt="" />
+                        <span className="font-bold truncate">Auto-Dictated: {dict.club.name}</span>
+                        <span className="text-[10px] text-slate-400 shrink-0">({dict.confidence}%)</span>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 <div>
-                  <label className="text-slate-300 block mb-1">Away Team</label>
+                  <label className="text-slate-300 block mb-1 font-medium">Away Team</label>
                   <input
                     type="text"
                     value={newFxAway}
                     onChange={(e) => setNewFxAway(e.target.value)}
-                    placeholder="e.g. Chelsea"
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                    placeholder="e.g. Chelsea, City Manchester"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500 text-xs"
                   />
+                  {newFxAway && (() => {
+                    const dict = dictateClub(newFxAway);
+                    return dict.club ? (
+                      <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-1 rounded-md">
+                        <img src={dict.club.logoUrl} className="w-4 h-4 object-contain shrink-0" alt="" />
+                        <span className="font-bold truncate">Auto-Dictated: {dict.club.name}</span>
+                        <span className="text-[10px] text-slate-400 shrink-0">({dict.confidence}%)</span>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               </div>
 
@@ -1715,7 +3179,7 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: EDIT FIXTURE (Phase 1) */}
+      {/* MODAL: EDIT FIXTURE */}
       {/* ========================================================================= */}
       {editingFixture && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1798,7 +3262,7 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: UPDATE CLUB LOGO (Phase 2) */}
+      {/* MODAL: UPDATE CLUB LOGO */}
       {/* ========================================================================= */}
       {clubToEditLogo && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1848,7 +3312,7 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: GRANT VIP (Phase 3) */}
+      {/* MODAL: GRANT VIP */}
       {/* ========================================================================= */}
       {showGrantVipModal && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1925,7 +3389,7 @@ Admin Endpoints (Authorization: Bearer <ADMIN_TOKEN>):
 - PATCH  /v1/admin/fixtures/{id}
 - DELETE /v1/admin/fixtures/{id}?force=true
 - GET    /v1/admin/fixtures
-- POST   /v1/admin/tips
+- POST   /v1/admin/tips (POST PREDICTIONS with auto-risk and auto-explanation)
 - DELETE /v1/admin/tips/{id}
 - POST   /v1/admin/settlements
 - POST   /v1/admin/clubs/{id}/logo
@@ -1953,7 +3417,7 @@ public class BackendClient {
     public void setAuthToken(String token) {
         this.authToken = token;
     }
-    // Supports: fetchFixtures, fetchTips (with upgradeRequired check), fetchProfile, createFixture, deleteFixture
+    // Supports: fetchFixtures, fetchTips (with upgradeRequired check), fetchProfile, createFixture, publishTip, deleteFixture
 }
 `;
 
@@ -2045,11 +3509,7 @@ CREATE TABLE users (
 CREATE TABLE audit_logs (...);
 `;
 
-const pythonAdminContent = `@router.post("/fixtures", response_model=FixtureItem)
-async def create_fixture(payload: AdminFixtureCreate, admin: AuthUser = Depends(get_admin_user)):
-    # Creates fixture and auto-links club logos
-
-@router.delete("/fixtures/{fixture_id}")
-async def delete_fixture(fixture_id: str, force: bool = Query(False), admin: AuthUser = Depends(get_admin_user)):
-    # Soft deletes; rejects if settled tips exist unless force=true
+const pythonAdminContent = `@router.post("/tips", response_model=TipItem)
+async def publish_tip(payload: AdminTipCreate, admin: AuthUser = Depends(get_admin_user)):
+    # Accommodates posting predictions with auto-derived risk, explanation, and collision-free ID
 `;

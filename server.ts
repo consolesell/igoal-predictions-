@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { MAJOR_CLUBS, dictateClub, dictateFixtureLogos } from './src/data/clubsData.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -145,117 +146,16 @@ export interface AuditLogRecord {
 const TODAY_EPOCH_START = Math.floor(new Date('2026-10-30T00:00:00Z').getTime() / 1000);
 const YESTERDAY_EPOCH_START = TODAY_EPOCH_START - 86400;
 
-// High-fidelity Club Logos (using reliable CDN badges with Firebase Storage paths)
-let clubs: ClubRecord[] = [
-  {
-    id: 'club_arsenal',
-    name: 'Arsenal FC',
-    shortName: 'Arsenal',
-    country: 'England',
-    logoPath: 'clubs/club_arsenal/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/9825.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_chelsea',
-    name: 'Chelsea FC',
-    shortName: 'Chelsea',
-    country: 'England',
-    logoPath: 'clubs/club_chelsea/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/8455.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_mancity',
-    name: 'Manchester City FC',
-    shortName: 'Man City',
-    country: 'England',
-    logoPath: 'clubs/club_mancity/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/8456.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_liverpool',
-    name: 'Liverpool FC',
-    shortName: 'Liverpool',
-    country: 'England',
-    logoPath: 'clubs/club_liverpool/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/8650.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_realmadrid',
-    name: 'Real Madrid CF',
-    shortName: 'Real Madrid',
-    country: 'Spain',
-    logoPath: 'clubs/club_realmadrid/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/8633.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_barcelona',
-    name: 'FC Barcelona',
-    shortName: 'Barcelona',
-    country: 'Spain',
-    logoPath: 'clubs/club_barcelona/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/8634.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_inter',
-    name: 'Inter Milan',
-    shortName: 'Inter',
-    country: 'Italy',
-    logoPath: 'clubs/club_inter/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/8636.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_juventus',
-    name: 'Juventus FC',
-    shortName: 'Juventus',
-    country: 'Italy',
-    logoPath: 'clubs/club_juventus/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/9885.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_bayern',
-    name: 'FC Bayern Munich',
-    shortName: 'Bayern',
-    country: 'Germany',
-    logoPath: 'clubs/club_bayern/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/9823.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_dortmund',
-    name: 'Borussia Dortmund',
-    shortName: 'Dortmund',
-    country: 'Germany',
-    logoPath: 'clubs/club_dortmund/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/9789.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_psg',
-    name: 'Paris Saint-Germain',
-    shortName: 'PSG',
-    country: 'France',
-    logoPath: 'clubs/club_psg/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/9847.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-  {
-    id: 'club_atletico',
-    name: 'Atletico Madrid',
-    shortName: 'Atletico',
-    country: 'Spain',
-    logoPath: 'clubs/club_atletico/logo.png',
-    logoUrl: 'https://images.fotmob.com/image_resources/logo/teamlogo/9906.png',
-    updatedAt: TODAY_EPOCH_START,
-  },
-];
+// High-fidelity Club Logos covering every major league (Premier League, La Liga, Serie A, Bundesliga, Ligue 1, and Global Giants)
+let clubs: ClubRecord[] = MAJOR_CLUBS.map((c) => ({
+  id: c.id,
+  name: c.name,
+  shortName: c.shortName,
+  country: c.country,
+  logoPath: c.logoPath,
+  logoUrl: c.logoUrl,
+  updatedAt: TODAY_EPOCH_START,
+}));
 
 let fixtures: FixtureRecord[] = [
   {
@@ -576,24 +476,33 @@ app.get('/v1/fixtures', (req: Request, res: Response) => {
   // Exclude soft-deleted (deletedAt != null)
   const activeFixtures = fixtures
     .filter((f) => f.deletedAt === null && f.kickoff >= startUtc && f.kickoff < endUtc)
-    .map((f) => ({
-      id: f.id,
-      league: f.league,
-      country: f.country,
-      home: f.home,
-      away: f.away,
-      kickoff: f.kickoff,
-      status: f.status,
-      // Strict nulls when unavailable
-      homeGoals: f.status === 'LIVE' || f.status === 'FINISHED' ? f.homeGoals : null,
-      awayGoals: f.status === 'LIVE' || f.status === 'FINISHED' ? f.awayGoals : null,
-      minute: f.status === 'LIVE' ? f.minute : null,
-      // Denormalized club logos (Phase 2)
-      homeClubId: f.homeClubId,
-      awayClubId: f.awayClubId,
-      homeLogoUrl: f.homeLogoUrl,
-      awayLogoUrl: f.awayLogoUrl,
-    }));
+    .map((f) => {
+      // Auto-dictate missing logos seamlessly even if misplaced or prefixed
+      const dictated = (!f.homeLogoUrl || !f.awayLogoUrl) ? dictateFixtureLogos(f.home, f.away) : null;
+      const homeLogoUrl = f.homeLogoUrl || dictated?.homeLogoUrl || null;
+      const awayLogoUrl = f.awayLogoUrl || dictated?.awayLogoUrl || null;
+      const homeClubId = f.homeClubId || dictated?.homeClubId || null;
+      const awayClubId = f.awayClubId || dictated?.awayClubId || null;
+
+      return {
+        id: f.id,
+        league: f.league,
+        country: f.country,
+        home: f.home,
+        away: f.away,
+        kickoff: f.kickoff,
+        status: f.status,
+        // Strict nulls when unavailable
+        homeGoals: f.status === 'LIVE' || f.status === 'FINISHED' ? f.homeGoals : null,
+        awayGoals: f.status === 'LIVE' || f.status === 'FINISHED' ? f.awayGoals : null,
+        minute: f.status === 'LIVE' ? f.minute : null,
+        // Denormalized club logos (Phase 2 & Auto-Dictation)
+        homeClubId,
+        awayClubId,
+        homeLogoUrl,
+        awayLogoUrl,
+      };
+    });
 
   res.status(200).json({
     source: 'football-data-v4',
@@ -629,23 +538,26 @@ app.get('/v1/tips', (req: Request, res: Response) => {
 
   const filteredTips = tips
     .filter((t) => t.tier === tier)
-    .map((t) => ({
-      id: t.id,
-      fixtureId: t.fixtureId,
-      league: t.league,
-      home: t.home,
-      away: t.away,
-      kickoff: t.kickoff,
-      market: t.market,
-      selection: t.selection,
-      confidence: t.confidence,
-      risk: t.risk,
-      explanation: t.explanation,
-      publishedAt: t.publishedAt,
-      modelVersion: t.modelVersion,
-      homeLogoUrl: t.homeLogoUrl,
-      awayLogoUrl: t.awayLogoUrl,
-    }));
+    .map((t) => {
+      const dictated = (!t.homeLogoUrl || !t.awayLogoUrl) ? dictateFixtureLogos(t.home, t.away) : null;
+      return {
+        id: t.id,
+        fixtureId: t.fixtureId,
+        league: t.league,
+        home: t.home,
+        away: t.away,
+        kickoff: t.kickoff,
+        market: t.market,
+        selection: t.selection,
+        confidence: t.confidence,
+        risk: t.risk,
+        explanation: t.explanation,
+        publishedAt: t.publishedAt,
+        modelVersion: t.modelVersion,
+        homeLogoUrl: t.homeLogoUrl || dictated?.homeLogoUrl || null,
+        awayLogoUrl: t.awayLogoUrl || dictated?.awayLogoUrl || null,
+      };
+    });
 
   res.status(200).json({
     source: 'igoal-engine-v1',
@@ -688,12 +600,51 @@ app.get('/v1/results', (req: Request, res: Response) => {
 });
 
 /**
- * 5. GET /v1/clubs & GET /v1/clubs/:id (Phase 2)
+ * 5. GET /v1/clubs (Phase 2)
  */
 app.get('/v1/clubs', (req: Request, res: Response) => {
   res.status(200).json({
     source: 'igoal-clubs-v1',
     clubs,
+  });
+});
+
+/**
+ * 5b. GET /v1/clubs/dictate & POST /v1/clubs/dictate
+ * Intelligent Auto-Dictation Engine: automatically resolves club and official logo
+ * even with prefixes ('FC', 'AFC'), suffixes, misplaced words ('Madrid Real'), or nicknames ('PSG', 'Spurs').
+ */
+app.get('/v1/clubs/dictate', (req: Request, res: Response) => {
+  const query = (req.query.name as string) || (req.query.q as string) || '';
+  const result = dictateClub(query);
+  res.status(200).json({
+    source: 'igoal-dictation-engine-v1',
+    query,
+    result,
+  });
+});
+
+app.post('/v1/clubs/dictate', (req: Request, res: Response) => {
+  const { name, names, home, away } = req.body;
+  if (home && away) {
+    const dictated = dictateFixtureLogos(home, away);
+    return res.status(200).json({
+      source: 'igoal-dictation-engine-v1',
+      fixture: dictated,
+    });
+  }
+  if (Array.isArray(names)) {
+    const results = names.map((n) => ({ query: n, ...dictateClub(n) }));
+    return res.status(200).json({
+      source: 'igoal-dictation-engine-v1',
+      results,
+    });
+  }
+  const result = dictateClub(name || '');
+  res.status(200).json({
+    source: 'igoal-dictation-engine-v1',
+    query: name,
+    result,
   });
 });
 
@@ -730,6 +681,43 @@ app.get('/v1/me', (req: Request, res: Response) => {
 // ------------------------------------------------------------------------------
 
 /**
+ * POST /v1/admin/fixtures/auto-dictate
+ * Batch auto-dictates and updates club logos for all existing fixtures.
+ */
+app.post('/v1/admin/fixtures/auto-dictate', requireAdminAuth, (req: Request, res: Response) => {
+  let updatedCount = 0;
+  fixtures.forEach((f) => {
+    const dictated = dictateFixtureLogos(f.home, f.away);
+    let changed = false;
+    if (!f.homeLogoUrl && dictated.homeLogoUrl) {
+      f.homeLogoUrl = dictated.homeLogoUrl;
+      changed = true;
+    }
+    if (!f.awayLogoUrl && dictated.awayLogoUrl) {
+      f.awayLogoUrl = dictated.awayLogoUrl;
+      changed = true;
+    }
+    if (!f.homeClubId && dictated.homeClubId) {
+      f.homeClubId = dictated.homeClubId;
+      changed = true;
+    }
+    if (!f.awayClubId && dictated.awayClubId) {
+      f.awayClubId = dictated.awayClubId;
+      changed = true;
+    }
+    if (changed) updatedCount++;
+  });
+
+  logAudit((req as any).user.uid, 'AUTO_DICTATE_FIXTURES', 'system', 'fixtures', { updatedCount });
+
+  res.status(200).json({
+    ok: true,
+    message: `Auto-dictated and updated ${updatedCount} fixtures with official club logos.`,
+    updatedCount,
+  });
+});
+
+/**
  * POST /v1/admin/fixtures (Phase 1)
  */
 app.post('/v1/admin/fixtures', requireAdminAuth, (req: Request, res: Response) => {
@@ -741,9 +729,12 @@ app.post('/v1/admin/fixtures', requireAdminAuth, (req: Request, res: Response) =
 
   const id = req.body.id || `fx_${Date.now()}_${home.substring(0, 3).toLowerCase()}_${away.substring(0, 3).toLowerCase()}`;
 
-  // Auto-resolve club IDs and logos
-  const hClub = clubs.find((c) => c.id === homeClubId || c.name.toLowerCase().includes(home.toLowerCase()) || home.toLowerCase().includes(c.shortName.toLowerCase()));
-  const aClub = clubs.find((c) => c.id === awayClubId || c.name.toLowerCase().includes(away.toLowerCase()) || away.toLowerCase().includes(c.shortName.toLowerCase()));
+  // Auto-dictate club IDs and logos even if misplaced words, prefixes, or nicknames
+  const dictated = dictateFixtureLogos(home, away);
+  const finalHomeLogo = req.body.homeLogoUrl || dictated.homeLogoUrl;
+  const finalAwayLogo = req.body.awayLogoUrl || dictated.awayLogoUrl;
+  const finalHomeClubId = homeClubId || dictated.homeClubId;
+  const finalAwayClubId = awayClubId || dictated.awayClubId;
 
   const newFixture: FixtureRecord = {
     id,
@@ -756,10 +747,10 @@ app.post('/v1/admin/fixtures', requireAdminAuth, (req: Request, res: Response) =
     homeGoals: fxStatus === 'SCHEDULED' ? null : (homeGoals !== undefined ? homeGoals : null),
     awayGoals: fxStatus === 'SCHEDULED' ? null : (awayGoals !== undefined ? awayGoals : null),
     minute: fxStatus === 'LIVE' ? (minute || 1) : null,
-    homeClubId: hClub ? hClub.id : (homeClubId || null),
-    awayClubId: aClub ? aClub.id : (awayClubId || null),
-    homeLogoUrl: hClub ? hClub.logoUrl : null,
-    awayLogoUrl: aClub ? aClub.logoUrl : null,
+    homeClubId: finalHomeClubId,
+    awayClubId: finalAwayClubId,
+    homeLogoUrl: finalHomeLogo,
+    awayLogoUrl: finalAwayLogo,
     deletedAt: null,
   };
 
@@ -788,6 +779,16 @@ app.patch('/v1/admin/fixtures/:id', requireAdminAuth, (req: Request, res: Respon
   if (updates.away !== undefined) target.away = updates.away;
   if (updates.league !== undefined) target.league = updates.league;
   if (updates.country !== undefined) target.country = updates.country;
+
+  // Auto-dictate if team changed or if logos not supplied
+  if (updates.home !== undefined || updates.away !== undefined) {
+    const dictated = dictateFixtureLogos(target.home, target.away);
+    if (!updates.homeLogoUrl && dictated.homeLogoUrl) target.homeLogoUrl = dictated.homeLogoUrl;
+    if (!updates.awayLogoUrl && dictated.awayLogoUrl) target.awayLogoUrl = dictated.awayLogoUrl;
+    if (dictated.homeClubId) target.homeClubId = dictated.homeClubId;
+    if (dictated.awayClubId) target.awayClubId = dictated.awayClubId;
+  }
+
   if (updates.homeLogoUrl !== undefined) target.homeLogoUrl = updates.homeLogoUrl;
   if (updates.awayLogoUrl !== undefined) target.awayLogoUrl = updates.awayLogoUrl;
 
@@ -867,7 +868,15 @@ app.post('/v1/admin/tips', requireAdminAuth, (req: Request, res: Response) => {
     return res.status(404).json({ error: `Active fixture '${fixtureId}' not found.` });
   }
 
-  const id = req.body.id || `tip_${Date.now()}_${fixtureId.replace('fx_', '')}`;
+  const conf = Math.max(0, Math.min(100, parseInt(confidence, 10) || 65));
+  const calculatedRisk: 'LOW' | 'MEDIUM' | 'HIGH' =
+    risk || (conf >= 70 ? 'LOW' : conf >= 58 ? 'MEDIUM' : 'HIGH');
+  const marketSlug = (market || 'pick').replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toLowerCase() || 'pick';
+  const id = req.body.id || `tip_${Date.now()}_${marketSlug}`;
+  const defaultExp =
+    explanation ||
+    `Analyst consensus on ${fx.home} vs ${fx.away}; ${selection} selected with ${conf}% confidence edge.`;
+
   const newTip: TipRecord = {
     id,
     fixtureId,
@@ -877,18 +886,18 @@ app.post('/v1/admin/tips', requireAdminAuth, (req: Request, res: Response) => {
     kickoff: fx.kickoff,
     market,
     selection,
-    confidence: parseInt(confidence, 10),
-    risk,
-    explanation,
+    confidence: conf,
+    risk: calculatedRisk,
+    explanation: defaultExp,
     publishedAt: Math.floor(Date.now() / 1000),
-    modelVersion: 'admin-manual-1.0',
+    modelVersion: req.body.modelVersion || 'expert-analyst-1.0',
     tier: tier || 'free',
     homeLogoUrl: fx.homeLogoUrl,
     awayLogoUrl: fx.awayLogoUrl,
   };
 
   tips.push(newTip);
-  logAudit((req as any).user.uid, 'TIP_PUBLISH', 'tip', id, { market, selection, tier: newTip.tier });
+  logAudit((req as any).user.uid, 'TIP_PUBLISH', 'tip', id, { market, selection, tier: newTip.tier, confidence: conf });
 
   res.status(201).json(newTip);
 });

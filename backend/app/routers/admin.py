@@ -226,7 +226,8 @@ async def publish_tip(
             detail={"error": f"Active fixture '{payload.fixture_id}' not found."}
         )
 
-    tip_id = payload.id or f"tip_{payload.fixture_id.replace('fx_', '')}_{payload.tier}"
+    market_slug = "".join(c for c in payload.market if c.isalnum())[:6].lower() or "pick"
+    tip_id = payload.id or f"tip_{payload.fixture_id.replace('fx_', '')}_{market_slug}_{int(time.time())}"
 
     # Check uniqueness
     existing = (await db.execute(select(Tip).where(Tip.id == tip_id))).scalar_one_or_none()
@@ -235,6 +236,21 @@ async def publish_tip(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": f"Tip with ID '{tip_id}' already exists."}
         )
+
+    # Derive risk automatically if not explicitly provided
+    calculated_risk = payload.risk
+    if not calculated_risk:
+        if payload.confidence >= 70:
+            calculated_risk = "LOW"
+        elif payload.confidence >= 58:
+            calculated_risk = "MEDIUM"
+        else:
+            calculated_risk = "HIGH"
+
+    default_exp = (
+        payload.explanation
+        or f"Analyst consensus on {fixture.home} vs {fixture.away}; {payload.selection} selected with {payload.confidence}% confidence edge."
+    )
 
     now_sec = int(time.time())
     tip = Tip(
@@ -247,10 +263,10 @@ async def publish_tip(
         market=payload.market,
         selection=payload.selection,
         confidence=payload.confidence,
-        risk=payload.risk,
-        explanation=payload.explanation,
+        risk=calculated_risk,
+        explanation=default_exp,
         published_at=now_sec,
-        model_version="admin-manual-1.0",
+        model_version=payload.model_version or "expert-analyst-1.0",
         tier=payload.tier,
         home_logo_url=fixture.home_logo_url,
         away_logo_url=fixture.away_logo_url

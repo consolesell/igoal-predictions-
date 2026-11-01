@@ -234,4 +234,26 @@ public class BackendClient {
             return response.isSuccessful();
         }
     }
+
+    public TipItem publishTip(String customBaseUrl, TipItem newTip) throws IOException {
+        String base = customBaseUrl != null ? customBaseUrl : DEFAULT_BASE_URL;
+        RequestBody body = RequestBody.create(gson.toJson(newTip), JSON_MEDIA);
+        Request request = newAuthenticatedRequest(base + "/v1/admin/tips")
+                .post(body)
+                .build();
+        try (Response response = httpClient.newCall(request).execute()) {
+            if (!response.isSuccessful()) throw new IOException("HTTP " + response.code() + ": " + response.body().string());
+            return gson.fromJson(response.body().string(), TipItem.class);
+        }
+    }
+
+    public boolean deleteTip(String customBaseUrl, String tipId) throws IOException {
+        String base = customBaseUrl != null ? customBaseUrl : DEFAULT_BASE_URL;
+        Request request = newAuthenticatedRequest(base + "/v1/admin/tips/" + tipId)
+                .delete()
+                .build();
+        try (Response response = httpClient.newCall(request).execute()) {
+            return response.isSuccessful();
+        }
+    }
 }

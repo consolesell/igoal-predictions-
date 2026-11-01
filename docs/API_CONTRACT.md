@@ -245,9 +245,39 @@
 - **Endpoint**: `POST /v1/admin/users/entitlement`
 - **Body**: `{"uid": "usr_123", "tier": "vip", "days": 30}`
 
-### 3.8 Audit Logs Listing
+### 3.8 Auto-Dictate Fixture Logos (Batch)
+- **Endpoint**: `POST /v1/admin/fixtures/auto-dictate`
+- **Effect**: Scans all managed fixtures and automatically detects, resolves, and links official high-res club badges based on fuzzy word matching, prefix stripping, and token sorting.
+
+### 3.9 Audit Logs Listing
 - **Endpoint**: `GET /v1/admin/audit`
-- **Response**: List of logged actions (`FIXTURE_CREATE`, `FIXTURE_UPDATE`, `FIXTURE_DELETE`, `LOGO_UPLOAD`, `VIP_GRANT`, etc.).
+- **Response**: List of logged actions (`FIXTURE_CREATE`, `FIXTURE_UPDATE`, `FIXTURE_DELETE`, `LOGO_UPLOAD`, `VIP_GRANT`, `AUTO_DICTATE_FIXTURES`, etc.).
+
+---
+
+## 3.10 Intelligent Auto-Dictation API
+- **Endpoint**: `GET /v1/clubs/dictate?name={query}` or `POST /v1/clubs/dictate`
+- **Purpose**: Normalizes and dictates club records even with misplaced words (`"Madrid Real"`), formal prefixes (`"FC Arsenal"`, `"AFC Bournemouth"`, `"1. FC Union Berlin"`), or abbreviations (`"bvb"`, `"psg"`, `"Spurs"`).
+- **Response `200`**:
+```json
+{
+  "source": "igoal-dictation-engine-v1",
+  "query": "Madrid Real",
+  "result": {
+    "club": {
+      "id": "club_realmadrid",
+      "name": "Real Madrid CF",
+      "shortName": "Real Madrid",
+      "country": "Spain",
+      "league": "La Liga",
+      "fotmobId": 8633,
+      "logoUrl": "https://images.fotmob.com/image_resources/logo/teamlogo/8633.png"
+    },
+    "confidence": 95,
+    "matchReason": "Misplaced words resolved (ordered tokens match 'Real Madrid CF')"
+  }
+}
+```
 
 ---
 
